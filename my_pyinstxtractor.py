@@ -11,9 +11,10 @@ import time
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLineEdit, QPushButton, QFileDialog, QMessageBox,
                              QHBoxLayout, QDialog, QLabel, QDialogButtonBox,
-                             QProgressDialog)
+                             QProgressDialog, QTextEdit, QGroupBox)
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
+from app_config import get_python_executable, is_valid_python_executable
 
 # 修复1: 使用sys.executable获取可执行文件路径
 if getattr(sys, 'frozen', False):
@@ -213,14 +214,30 @@ class PyInstxtractorGUI(QMainWindow):
 
         layout.addLayout(top_layout)
 
+        self.python_status_label = QLabel(f"当前Python解释器: {get_python_executable()}")
+        layout.addWidget(self.python_status_label)
+
         # 文件输入框
         self.file_input = FileDropLineEdit()
+        self.file_input.textChanged.connect(self.update_command_display)
         layout.addWidget(self.file_input)
+
+        command_group = QGroupBox("预期命令")
+        command_layout = QVBoxLayout(command_group)
+
+        self.command_display = QTextEdit()
+        self.command_display.setReadOnly(True)
+        self.command_display.setPlaceholderText("选择待解包 EXE 后，这里会显示实际执行的命令")
+        command_layout.addWidget(self.command_display)
+
+        layout.addWidget(command_group)
 
         # 解包按钮
         self.unpack_btn = QPushButton("解包")
         self.unpack_btn.clicked.connect(self.execute_unpack)
         layout.addWidget(self.unpack_btn)
+
+        self.update_command_display()
 
     def load_config(self):
         """加载配置文件"""
@@ -280,6 +297,7 @@ class PyInstxtractorGUI(QMainWindow):
                 config.write(configfile)
             self.config['script_path'] = script_path
             self.status_label.setText(f"当前pyinstxtractor路径: {script_path}")
+            self.update_command_display()
         except Exception as e:
             # 修复6: 处理配置文件保存失败的情况
             QMessageBox.warning(
@@ -303,6 +321,45 @@ class PyInstxtractorGUI(QMainWindow):
                         "无效路径",
                         f"路径无效或不是Python脚本:\n{new_path}"
                     )
+
+    def build_unpack_command(self):
+        """构建解包命令"""
+        python_exe = get_python_executable()
+        script_path = self.config['script_path']
+        file_path = self.file_input.text().strip()
+
+        if not is_valid_python_executable(python_exe):
+            return None
+        if not script_path or not os.path.exists(script_path):
+            return None
+        if not file_path:
+            return None
+
+        return [python_exe, script_path, file_path]
+
+    def update_command_display(self):
+        """更新预期命令显示"""
+        python_exe = get_python_executable()
+        self.python_status_label.setText(f"当前Python解释器: {python_exe}")
+
+        if not is_valid_python_executable(python_exe):
+            self.command_display.setPlainText("请先在主界面配置有效的 Python 解释器")
+            return
+
+        script_path = self.config['script_path']
+        if not script_path or not os.path.exists(script_path):
+            self.command_display.setPlainText("请先配置有效的 pyinstxtractor.py 路径")
+            return
+
+        if not self.file_input.text().strip():
+            self.command_display.setPlainText("请先选择待解包的 EXE 文件")
+            return
+
+        command = self.build_unpack_command()
+        if command:
+            self.command_display.setPlainText(subprocess.list2cmdline(command))
+        else:
+            self.command_display.setPlainText("无法生成解包命令，请检查输入")
 
     def execute_unpack(self):
         """执行解包命令并移动解包文件"""
@@ -349,12 +406,10 @@ class PyInstxtractorGUI(QMainWindow):
         #     file_path
         # ]
 
-        python_exe = shutil.which("python") or shutil.which("python3")
-        if not python_exe:
-            QMessageBox.critical(self, "错误", "未找到系统 Python，请先安装并配置环境变量")
+        command = self.build_unpack_command()
+        if not command:
+            QMessageBox.critical(self, "错误", "未找到有效的 Python 解释器，请先在主界面配置并保存")
             return
-
-        command = [python_exe, script_path, file_path]
 
         self.unpack_thread = UnpackThread(command, target_dir, extracted_dir)
         self.unpack_thread.finished.connect(self.handle_unpack_finished)
