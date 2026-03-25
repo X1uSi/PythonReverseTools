@@ -1,0 +1,815 @@
+# PyInstaller 使用手册
+
+## 1. 简介
+
+`PyInstaller` 用于将 Python 脚本打包为可执行程序，支持 Windows、macOS、Linux。
+
+常见用途：
+
+- 将 `.py` 脚本打包为 `.exe`
+- 生成单文件程序
+- 生成单目录程序
+- 添加图标、资源文件、依赖数据
+- 控制控制台窗口显示方式
+- 指定输出目录、临时目录、日志级别等
+
+---
+
+## 2. 基本命令格式
+
+```bash
+pyinstaller [选项] scriptname.py
+```
+
+也可以处理多个脚本：
+
+```bash
+pyinstaller [选项] script1.py script2.py
+```
+
+也可以直接使用 `.spec` 文件：
+
+```bash
+pyinstaller myapp.spec
+```
+
+---
+
+## 3. 命令总览
+
+```bash
+pyinstaller [-h] [-v] [-D] [-F] [--specpath DIR] [-n NAME]
+            [--contents-directory CONTENTS_DIRECTORY]
+            [--add-data SOURCE:DEST] [--add-binary SOURCE:DEST]
+            [-p DIR] [--hidden-import MODULENAME]
+            [--collect-submodules MODULENAME]
+            [--collect-data MODULENAME] [--collect-binaries MODULENAME]
+            [--collect-all MODULENAME] [--copy-metadata PACKAGENAME]
+            [--recursive-copy-metadata PACKAGENAME]
+            [--additional-hooks-dir HOOKSPATH]
+            [--runtime-hook RUNTIME_HOOKS] [--exclude-module EXCLUDES]
+            [--splash IMAGE_FILE]
+            [-d {all,imports,bootloader,noarchive}] [--optimize LEVEL]
+            [--python-option PYTHON_OPTION] [-s] [--noupx]
+            [--upx-exclude FILE] [-c] [-w]
+            [--hide-console {minimize-late,hide-late,hide-early,minimize-early}]
+            [-i <FILE.ico or FILE.exe,ID or FILE.icns or Image or "NONE">]
+            [--disable-windowed-traceback] [--version-file FILE]
+            [--manifest <FILE or XML>] [-m <FILE or XML>] [-r RESOURCE]
+            [--uac-admin] [--uac-uiaccess] [--argv-emulation]
+            [--osx-bundle-identifier BUNDLE_IDENTIFIER]
+            [--target-architecture ARCH] [--codesign-identity IDENTITY]
+            [--osx-entitlements-file FILENAME] [--runtime-tmpdir PATH]
+            [--bootloader-ignore-signals] [--distpath DIR]
+            [--workpath WORKPATH] [-y] [--upx-dir UPX_DIR] [--clean]
+            [--log-level LEVEL]
+            scriptname [scriptname ...]
+```
+
+---
+
+## 4. 位置参数
+
+### `scriptname`
+
+要处理的脚本文件名，或者一个 `.spec` 文件。
+
+说明：
+
+- 可以传入一个或多个 `.py` 文件
+- 如果传入的是 `.spec` 文件，大多数命令行选项会被忽略
+
+示例：
+
+```bash
+pyinstaller app.py
+pyinstaller app1.py app2.py
+pyinstaller app.spec
+```
+
+---
+
+## 5. 通用选项
+
+### `-h, --help`
+
+显示帮助信息并退出。
+
+```bash
+pyinstaller --help
+```
+
+### `-v, --version`
+
+显示 PyInstaller 版本信息并退出。
+
+```bash
+pyinstaller --version
+```
+
+### `--distpath DIR`
+
+指定最终打包输出目录，默认是 `./dist`。
+
+```bash
+pyinstaller --distpath output app.py
+```
+
+### `--workpath WORKPATH`
+
+指定构建过程中的临时工作目录，默认是 `./build`。
+
+```bash
+pyinstaller --workpath build_temp app.py
+```
+
+### `-y, --noconfirm`
+
+如果输出目录已存在，直接覆盖，不再确认。
+
+```bash
+pyinstaller -y app.py
+```
+
+### `--upx-dir UPX_DIR`
+
+指定 `UPX` 工具路径。
+
+```bash
+pyinstaller --upx-dir D:\upx app.py
+```
+
+### `--clean`
+
+构建前清理 PyInstaller 缓存和临时文件。
+
+```bash
+pyinstaller --clean app.py
+```
+
+### `--log-level LEVEL`
+
+设置构建日志级别。
+
+可选值：
+
+- `TRACE`
+- `DEBUG`
+- `INFO`
+- `WARN`
+- `DEPRECATION`
+- `ERROR`
+- `FATAL`
+
+```bash
+pyinstaller --log-level DEBUG app.py
+```
+
+---
+
+## 6. 生成类型选项
+
+### `-D, --onedir`
+
+生成单目录程序。
+
+特点：
+
+- 默认方式
+- 所有依赖文件会放在同一目录中
+- 启动快
+- 便于调试
+
+```bash
+pyinstaller -D app.py
+```
+
+### `-F, --onefile`
+
+生成单文件程序。
+
+特点：
+
+- 打包成一个可执行文件
+- 分发方便
+- 启动时会先解压临时文件
+
+```bash
+pyinstaller -F app.py
+```
+
+### `--specpath DIR`
+
+指定生成 `.spec` 文件的目录。
+
+```bash
+pyinstaller --specpath spec_output app.py
+```
+
+### `-n NAME, --name NAME`
+
+指定生成程序和 `.spec` 文件的名称。
+
+```bash
+pyinstaller -n MyApp app.py
+```
+
+### `--contents-directory CONTENTS_DIRECTORY`
+
+仅用于 `onedir` 模式，指定支持文件所在目录名。
+
+说明：
+
+- 默认支持文件放在一个内容目录中
+- 使用 `.` 可恢复旧版布局
+
+```bash
+pyinstaller --contents-directory contents app.py
+pyinstaller --contents-directory . app.py
+```
+
+---
+
+## 7. 打包资源与依赖
+
+### `--add-data SOURCE:DEST`
+
+添加数据文件或目录。
+
+格式：
+
+```bash
+--add-data "源路径:目标目录"
+```
+
+说明：
+
+- `SOURCE`：源文件或目录
+- `DEST`：目标目录，相对于程序顶层目录
+- 若想放到顶层目录，目标写 `.`
+
+示例：
+
+```bash
+pyinstaller --add-data "config.json:." app.py
+pyinstaller --add-data "assets:assets" app.py
+```
+
+### `--add-binary SOURCE:DEST`
+
+添加二进制文件。
+
+```bash
+pyinstaller --add-binary "mylib.dll:." app.py
+```
+
+### `-p DIR, --paths DIR`
+
+添加导入搜索路径，类似 `PYTHONPATH`。
+
+多个路径可用分号分隔，也可多次使用。
+
+```bash
+pyinstaller -p D:\libs app.py
+pyinstaller --paths D:\lib1;D:\lib2 app.py
+```
+
+### `--hidden-import MODULENAME, --hiddenimport MODULENAME`
+
+指定隐藏导入模块。
+
+适用于动态导入、反射导入等情况。
+
+```bash
+pyinstaller --hidden-import pkg_resources app.py
+```
+
+### `--collect-submodules MODULENAME`
+
+收集指定包的所有子模块。
+
+```bash
+pyinstaller --collect-submodules PyQt5 app.py
+```
+
+### `--collect-data MODULENAME, --collect-datas MODULENAME`
+
+收集指定包的数据文件。
+
+```bash
+pyinstaller --collect-data matplotlib app.py
+```
+
+### `--collect-binaries MODULENAME`
+
+收集指定包的二进制文件。
+
+```bash
+pyinstaller --collect-binaries numpy app.py
+```
+
+### `--collect-all MODULENAME`
+
+收集指定包的所有子模块、数据文件和二进制文件。
+
+```bash
+pyinstaller --collect-all PySide6 app.py
+```
+
+### `--copy-metadata PACKAGENAME`
+
+复制指定包的元数据。
+
+```bash
+pyinstaller --copy-metadata requests app.py
+```
+
+### `--recursive-copy-metadata PACKAGENAME`
+
+复制指定包及其依赖的元数据。
+
+```bash
+pyinstaller --recursive-copy-metadata importlib_metadata app.py
+```
+
+### `--additional-hooks-dir HOOKSPATH`
+
+添加额外 hook 搜索目录。
+
+```bash
+pyinstaller --additional-hooks-dir hooks app.py
+```
+
+### `--runtime-hook RUNTIME_HOOKS`
+
+添加运行时 hook 文件。
+
+```bash
+pyinstaller --runtime-hook runtime_hook.py app.py
+```
+
+### `--exclude-module EXCLUDES`
+
+排除模块或包，不参与打包。
+
+```bash
+pyinstaller --exclude-module tkinter app.py
+```
+
+### `--splash IMAGE_FILE`
+
+添加启动 splash 图片。
+
+```bash
+pyinstaller --splash splash.png app.py
+```
+
+---
+
+## 8. 构建与调试选项
+
+### `-d {all,imports,bootloader,noarchive}, --debug {all,imports,bootloader,noarchive}`
+
+启用调试模式。
+
+可选值：
+
+- `all`
+- `imports`
+- `bootloader`
+- `noarchive`
+
+```bash
+pyinstaller -d all app.py
+pyinstaller -d imports app.py
+pyinstaller -d bootloader app.py
+pyinstaller -d noarchive app.py
+```
+
+### `--optimize LEVEL`
+
+设置字节码优化级别。
+
+```bash
+pyinstaller --optimize 1 app.py
+pyinstaller --optimize 2 app.py
+```
+
+### `--python-option PYTHON_OPTION`
+
+指定运行时传递给 Python 解释器的参数。
+
+支持示例：
+
+- `v`
+- `u`
+- `W <warning control>`
+- `X <xoption>`
+- `hash_seed=<value>`
+
+```bash
+pyinstaller --python-option v app.py
+pyinstaller --python-option "W ignore" app.py
+```
+
+### `-s, --strip`
+
+对可执行文件和共享库做符号表剥离。
+
+```bash
+pyinstaller -s app.py
+```
+
+### `--noupx`
+
+即使检测到 UPX，也不使用。
+
+```bash
+pyinstaller --noupx app.py
+```
+
+### `--upx-exclude FILE`
+
+排除某个二进制文件，不让 UPX 压缩。
+
+```bash
+pyinstaller --upx-exclude vcruntime140.dll app.py
+```
+
+---
+
+## 9. Windows 与 macOS 通用选项
+
+### `-c, --console, --nowindowed`
+
+启用控制台窗口。
+
+```bash
+pyinstaller -c app.py
+```
+
+### `-w, --windowed, --noconsole`
+
+不显示控制台窗口。
+
+```bash
+pyinstaller -w app.py
+```
+
+### `--hide-console {minimize-late,hide-late,hide-early,minimize-early}`
+
+仅 Windows 可用，用于自动隐藏或最小化控制台。
+
+```bash
+pyinstaller --hide-console hide-early app.py
+```
+
+### `-i <FILE...>, --icon <FILE...>`
+
+设置程序图标。
+
+支持格式：
+
+- `FILE.ico`
+- `FILE.exe,ID`
+- `FILE.icns`
+- 图片文件
+- `"NONE"`
+
+```bash
+pyinstaller -i app.ico app.py
+pyinstaller --icon myexe.exe,1 app.py
+```
+
+### `--disable-windowed-traceback`
+
+禁用 `windowed/noconsole` 模式下未处理异常的 traceback 弹窗。
+
+```bash
+pyinstaller --disable-windowed-traceback -w app.py
+```
+
+---
+
+## 10. Windows 专用选项
+
+### `--version-file FILE`
+
+为 exe 添加版本资源文件。
+
+```bash
+pyinstaller --version-file version.txt app.py
+```
+
+### `--manifest <FILE or XML>`
+
+为 exe 添加 manifest 文件或 XML。
+
+```bash
+pyinstaller --manifest app.manifest app.py
+```
+
+### `-m <FILE or XML>`
+
+`--manifest` 的旧简写，已废弃。
+
+```bash
+pyinstaller -m app.manifest app.py
+```
+
+### `-r RESOURCE, --resource RESOURCE`
+
+向 Windows 可执行文件中添加或更新资源。
+
+格式：
+
+```bash
+FILE[,TYPE[,NAME[,LANGUAGE]]]
+```
+
+```bash
+pyinstaller --resource myres.bin,10,101,0 app.py
+```
+
+### `--uac-admin`
+
+创建一个请求管理员权限提升的 manifest。
+
+```bash
+pyinstaller --uac-admin app.py
+```
+
+### `--uac-uiaccess`
+
+允许提权程序与远程桌面一起工作。
+
+```bash
+pyinstaller --uac-uiaccess app.py
+```
+
+---
+
+## 11. macOS 专用选项
+
+### `--argv-emulation`
+
+启用 macOS app bundle 的 argv 模拟。
+
+```bash
+pyinstaller --argv-emulation app.py
+```
+
+### `--osx-bundle-identifier BUNDLE_IDENTIFIER`
+
+设置 macOS app bundle 标识符。
+
+```bash
+pyinstaller --osx-bundle-identifier com.example.myapp app.py
+```
+
+### `--target-architecture ARCH, --target-arch ARCH`
+
+设置目标架构，可选值：
+
+- `x86_64`
+- `arm64`
+- `universal2`
+
+```bash
+pyinstaller --target-architecture arm64 app.py
+```
+
+### `--codesign-identity IDENTITY`
+
+指定代码签名身份。
+
+```bash
+pyinstaller --codesign-identity "Developer ID Application: XXX" app.py
+```
+
+### `--osx-entitlements-file FILENAME`
+
+指定 macOS 签名所用 entitlements 文件。
+
+```bash
+pyinstaller --osx-entitlements-file entitlements.plist app.py
+```
+
+---
+
+## 12. 较少使用的特殊选项
+
+### `--runtime-tmpdir PATH`
+
+指定 `onefile` 模式运行时的临时解压目录。
+
+```bash
+pyinstaller --runtime-tmpdir D:\Temp app.py
+```
+
+### `--bootloader-ignore-signals`
+
+让 bootloader 忽略信号，而不是转发给子进程。
+
+```bash
+pyinstaller --bootloader-ignore-signals app.py
+```
+
+---
+
+## 13. 常见使用示例
+
+### 最简单打包
+
+```bash
+pyinstaller app.py
+```
+
+### 打包为单文件
+
+```bash
+pyinstaller -F app.py
+```
+
+### 打包为无控制台 GUI 程序
+
+```bash
+pyinstaller -F -w app.py
+```
+
+### 指定程序名称和图标
+
+```bash
+pyinstaller -F -n MyApp -i app.ico app.py
+```
+
+### 添加资源文件
+
+```bash
+pyinstaller -F --add-data "config.json:." app.py
+```
+
+### 添加隐藏导入
+
+```bash
+pyinstaller -F --hidden-import pkg_resources app.py
+```
+
+### 清理缓存并覆盖旧输出
+
+```bash
+pyinstaller -F --clean -y app.py
+```
+
+### 指定输出目录和构建目录
+
+```bash
+pyinstaller -F --distpath dist_out --workpath build_temp app.py
+```
+
+### 调试导入问题
+
+```bash
+pyinstaller -F -d imports app.py
+```
+
+### 收集整个包的所有内容
+
+```bash
+pyinstaller -F --collect-all PyQt5 app.py
+```
+
+---
+
+## 14. 常见参数组合建议
+
+### 控制台程序
+
+```bash
+pyinstaller -F -c app.py
+```
+
+### GUI 程序
+
+```bash
+pyinstaller -F -w app.py
+```
+
+### GUI 程序带图标
+
+```bash
+pyinstaller -F -w -i app.ico app.py
+```
+
+### 复杂项目推荐
+
+```bash
+pyinstaller -F -w --clean -y --hidden-import xxx --add-data "assets:assets" app.py
+```
+
+---
+
+## 15. 常见问题说明
+
+### 为什么程序能运行但打包后报缺模块？
+
+可能原因：
+
+- 使用了动态导入
+- 依赖没有被自动分析到
+
+解决方法：
+
+- 使用 `--hidden-import`
+- 使用 `--collect-submodules`
+- 使用 `--collect-all`
+
+### 为什么打包后资源文件找不到？
+
+可能原因：
+
+- 没有使用 `--add-data`
+- 程序内资源路径写法不兼容打包环境
+
+解决方法：
+
+- 用 `--add-data` 添加资源
+- 代码中兼容 PyInstaller 的运行路径
+
+### 为什么 GUI 程序还弹控制台？
+
+请检查是否使用了：
+
+```bash
+-w
+```
+
+或：
+
+```bash
+--windowed
+```
+
+### onefile 和 onedir 怎么选？
+
+`onedir`：
+
+- 启动快
+- 调试方便
+- 文件较多
+
+`onefile`：
+
+- 分发方便
+- 单个文件
+- 启动时会先解压
+
+---
+
+## 16. 参数速查表
+
+| 参数               | 含义             |
+| ------------------ | ---------------- |
+| `-h`, `--help`     | 显示帮助         |
+| `-v`, `--version`  | 显示版本         |
+| `-D`, `--onedir`   | 单目录模式       |
+| `-F`, `--onefile`  | 单文件模式       |
+| `-n`, `--name`     | 指定名称         |
+| `-i`, `--icon`     | 设置图标         |
+| `-c`, `--console`  | 显示控制台       |
+| `-w`, `--windowed` | 不显示控制台     |
+| `--add-data`       | 添加数据文件     |
+| `--add-binary`     | 添加二进制文件   |
+| `--hidden-import`  | 添加隐藏导入     |
+| `--collect-all`    | 收集包的全部内容 |
+| `--distpath`       | 输出目录         |
+| `--workpath`       | 临时工作目录     |
+| `-y`               | 覆盖输出不确认   |
+| `--clean`          | 清理缓存         |
+| `--log-level`      | 设置日志级别     |
+| `-d`, `--debug`    | 调试模式         |
+| `--noupx`          | 不使用 UPX       |
+| `--upx-dir`        | 指定 UPX 路径    |
+| `--version-file`   | 添加版本资源     |
+| `--manifest`       | 添加 manifest    |
+| `--uac-admin`      | 请求管理员权限   |
+
+---
+
+## 17. 推荐命令
+
+如果只是常规打包，最常用的命令通常是：
+
+```bash
+pyinstaller -F -w -i app.ico app.py
+```
+
+如果项目依赖复杂，建议逐步增加这些参数：
+
+- `--hidden-import`
+- `--collect-all`
+- `--add-data`
+- `--clean`
+- `-y`
+
+这样更容易定位和解决打包问题。
