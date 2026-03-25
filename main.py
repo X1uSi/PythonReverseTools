@@ -3,9 +3,11 @@ import sys
 import os
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QPushButton, QHBoxLayout, QDialog, QLabel,
-                            QDialogButtonBox, QGroupBox)
+                            QDialogButtonBox, QGroupBox, QLineEdit, QComboBox,
+                            QFileDialog, QMessageBox)
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QDesktopServices, QIcon, QFont
+from app_config import load_app_config, save_app_config, is_valid_python_executable
 
 # 导入各个功能模块
 from my_pyinstxtractor import PyInstxtractorGUI
@@ -13,6 +15,8 @@ from my_pyinstaller import PyInstallerGUI
 from my_pycdc import PycdcGUI
 from my_pycdas import PycdasGUI
 from my_uncompyle6 import Uncompyle6GUI
+from my_pyversion_detect import PyVersionDetectGUI
+from my_pyz_repair import PyzRepairGUI
 
 
 class OnlineDecompilerDialog(QDialog):
@@ -36,7 +40,6 @@ class OnlineDecompilerDialog(QDialog):
             ("Tool.lu", "https://tool.lu/pyc/", "中文界面，简单易用"),
             ("LDDGO", "https://www.lddgo.net/string/pyc-compile-decompile", "支持编译和解编译"),
             ("Decompiler.com", "https://www.decompiler.com/", "专业的反编译工具"),
-            ("Python Decompiler", "https://python-decompiler.com/", "专注于Python反编译")
         ]
 
         for name, url, description in tools:
@@ -97,7 +100,7 @@ class DecompilerChoiceDialog(QDialog):
         self.tool_buttons = []
 
         # pycdc
-        pycdc_btn = QPushButton("pycdc (支持Python 3.9及以下)")
+        pycdc_btn = QPushButton("pycdc")
         pycdc_btn.setToolTip("最强大的反编译工具之一，支持较新的Python版本")
         pycdc_btn.clicked.connect(lambda: self.select_tool("pycdc"))
         layout.addWidget(pycdc_btn)
@@ -145,6 +148,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Python工具集")
         self.setGeometry(300, 300, 500, 300)
+        self.app_config = load_app_config()
 
         # 设置应用图标
         if hasattr(sys, '_MEIPASS'):
@@ -168,8 +172,39 @@ class MainWindow(QMainWindow):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
+        python_group = QGroupBox("Python解释器")
+        python_layout = QVBoxLayout(python_group)
+
+        python_row = QHBoxLayout()
+        self.python_path_combo = QComboBox()
+        self.python_path_combo.setEditable(True)
+        self.python_path_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.python_path_combo.setMinimumWidth(320)
+        python_row.addWidget(self.python_path_combo)
+
+        browse_python_btn = QPushButton("浏览...")
+        browse_python_btn.clicked.connect(self.select_python_executable)
+        python_row.addWidget(browse_python_btn)
+
+        add_python_btn = QPushButton("添加")
+        add_python_btn.clicked.connect(self.add_python_path)
+        python_row.addWidget(add_python_btn)
+
+        save_python_btn = QPushButton("保存")
+        save_python_btn.clicked.connect(self.save_python_config)
+        python_row.addWidget(save_python_btn)
+
+        python_layout.addLayout(python_row)
+
+        self.python_status_label = QLabel(
+            f"当前解释器: {self.app_config['python_executable']}"
+        )
+        python_layout.addWidget(self.python_status_label)
+
+        layout.addWidget(python_group)
+
         # 添加间距
-        layout.addSpacing(30)
+        layout.addSpacing(20)
 
         # 功能按钮
         self.unpack_btn = QPushButton("1. PyInstaller解包")
@@ -187,12 +222,95 @@ class MainWindow(QMainWindow):
         self.decompile_btn.clicked.connect(self.open_decompiler_choice)
         layout.addWidget(self.decompile_btn)
 
+        self.detect_version_btn = QPushButton("4. 识别 EXE 打包 Python 版本")
+        self.detect_version_btn.setFont(QFont("Arial", 12))
+        self.detect_version_btn.clicked.connect(self.open_pyversion_detect)
+        layout.addWidget(self.detect_version_btn)
+
+        self.pyz_repair_btn = QPushButton("5. 修复 PYZ 加密 pyc")
+        self.pyz_repair_btn.setFont(QFont("Arial", 12))
+        self.pyz_repair_btn.clicked.connect(self.open_pyz_repair)
+        layout.addWidget(self.pyz_repair_btn)
+
+        self.refresh_python_path_combo()
+
         # 添加底部信息
         layout.addStretch()
-        footer = QLabel("© 2025 Python工具集 | 版本 1.0 | 作者: xiusi")
+        footer = QLabel('© 2026 Python工具集 | 版本 2.0 | 作者: <a href="https://github.com/X1uSi">XiuSi</a>')
         footer.setAlignment(Qt.AlignCenter)
         footer.setStyleSheet("color: gray;")
+        footer.setOpenExternalLinks(True)
         layout.addWidget(footer)
+
+    def select_python_executable(self):
+        """选择 Python 解释器"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Python 解释器",
+            self.python_path_combo.currentText().strip(),
+            "可执行文件 (*.exe);;所有文件 (*)"
+        )
+        if file_path:
+            self.python_path_combo.setCurrentText(file_path)
+
+    def refresh_python_path_combo(self):
+        """刷新解释器下拉列表"""
+        current_text = self.app_config["python_executable"]
+        saved_paths = self.app_config.get("saved_python_paths", [current_text])
+
+        self.python_path_combo.blockSignals(True)
+        self.python_path_combo.clear()
+        self.python_path_combo.addItems(saved_paths)
+        self.python_path_combo.setCurrentText(current_text)
+        self.python_path_combo.blockSignals(False)
+
+    def add_python_path(self):
+        """添加当前解释器路径到保存列表"""
+        python_path = self.python_path_combo.currentText().strip()
+
+        if not is_valid_python_executable(python_path):
+            QMessageBox.warning(self, "无效路径", f"Python 解释器路径无效:\n{python_path}")
+            return
+
+        saved_paths = list(self.app_config.get("saved_python_paths", []))
+        if python_path in saved_paths:
+            saved_paths.remove(python_path)
+        saved_paths.insert(0, python_path)
+
+        try:
+            save_app_config(self.app_config["python_executable"], saved_paths)
+        except Exception as exc:
+            QMessageBox.critical(self, "保存失败", f"无法保存配置文件:\n{exc}")
+            return
+
+        self.app_config = load_app_config()
+        self.python_path_combo.setCurrentText(python_path)
+        self.refresh_python_path_combo()
+        QMessageBox.information(self, "添加成功", "Python 解释器路径已加入下拉列表。")
+
+    def save_python_config(self):
+        """保存 Python 解释器配置"""
+        python_path = self.python_path_combo.currentText().strip()
+
+        if not is_valid_python_executable(python_path):
+            QMessageBox.warning(self, "无效路径", f"Python 解释器路径无效:\n{python_path}")
+            return
+
+        saved_paths = list(self.app_config.get("saved_python_paths", []))
+        if python_path in saved_paths:
+            saved_paths.remove(python_path)
+        saved_paths.insert(0, python_path)
+
+        try:
+            save_app_config(python_path, saved_paths)
+        except Exception as exc:
+            QMessageBox.critical(self, "保存失败", f"无法保存配置文件:\n{exc}")
+            return
+
+        self.app_config = load_app_config()
+        self.refresh_python_path_combo()
+        self.python_status_label.setText(f"当前解释器: {python_path}")
+        QMessageBox.information(self, "保存成功", "Python 解释器配置已保存，后续功能将使用该解释器。")
 
     def open_pyinstxtractor(self):
         """打开PyInstaller解包工具"""
@@ -221,6 +339,16 @@ class MainWindow(QMainWindow):
             elif tool == "online":
                 online_dialog = OnlineDecompilerDialog(self)
                 online_dialog.exec_()
+
+    def open_pyversion_detect(self):
+        """打开 EXE 打包 Python 版本识别工具"""
+        self.pyversion_detect_gui = PyVersionDetectGUI()
+        self.pyversion_detect_gui.show()
+
+    def open_pyz_repair(self):
+        """打开 PYZ 加密 pyc 修复工具"""
+        self.pyz_repair_gui = PyzRepairGUI()
+        self.pyz_repair_gui.show()
 
 
 if __name__ == "__main__":
