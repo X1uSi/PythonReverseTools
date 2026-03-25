@@ -1,5 +1,6 @@
 # my_pyinstaller.py - PyInstaller打包工具GUI
 import os
+import subprocess
 import sys
 import shlex
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -7,6 +8,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QT
                              QTextEdit, QFileDialog, QMessageBox, QProgressBar, QDialog)
 from PyQt5.QtCore import Qt, QUrl, QProcess, QMimeData
 from PyQt5.QtGui import QFont, QDesktopServices, QTextCursor, QDragEnterEvent, QDropEvent
+from app_config import get_python_executable, is_valid_python_executable
 
 
 class DragDropLineEdit(QLineEdit):
@@ -34,6 +36,10 @@ class PyInstallerGUI(QWidget):
         super().__init__(parent)
         self.setWindowTitle("PyInstaller打包工具")
         self.setMinimumSize(800, 600)
+        self.process = None
+        self.last_output_dir = None
+        self.distpath_customized = False
+        self.workpath_customized = False
 
         # 创建主布局
         main_layout = QVBoxLayout(self)
@@ -64,8 +70,53 @@ class PyInstallerGUI(QWidget):
         btn_layout.addWidget(self.execute_btn)
         main_layout.addLayout(btn_layout)
 
-        # 初始化进程
-        self.process = None
+    def open_pyinstaller_manual(self):
+        """打开本地 PyInstaller 手册，缺失时回退到官网"""
+        manual_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "PyInstaller使用手册.md")
+        if os.path.exists(manual_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(manual_path))
+        else:
+            QDesktopServices.openUrl(QUrl("https://pyinstaller.org/en/stable/usage.html"))
+
+    def get_script_directory(self, file_path):
+        """获取待打包脚本所在目录"""
+        if not file_path:
+            return ""
+        return os.path.dirname(os.path.abspath(file_path))
+
+    def get_default_distpath(self, file_path):
+        """默认输出目录为脚本同目录"""
+        return self.get_script_directory(file_path)
+
+    def get_default_workpath(self, file_path):
+        """默认工作目录为脚本同目录"""
+        return self.get_script_directory(file_path)
+
+    def on_distpath_changed(self, text):
+        """记录 distpath 是否被用户手动修改"""
+        default_path = self.get_default_distpath(self.file_input.text().strip())
+        self.distpath_customized = bool(text.strip()) and text.strip() != default_path
+        self.update_command_display()
+
+    def on_workpath_changed(self, text):
+        """记录 workpath 是否被用户手动修改"""
+        default_path = self.get_default_workpath(self.file_input.text().strip())
+        self.workpath_customized = bool(text.strip()) and text.strip() != default_path
+        self.update_command_display()
+
+    def select_distpath(self):
+        """选择 dist 输出目录"""
+        current_dir = self.distpath_input.text().strip() or self.get_default_distpath(self.file_input.text().strip())
+        selected_dir = QFileDialog.getExistingDirectory(self, "选择 dist 输出目录", current_dir)
+        if selected_dir:
+            self.distpath_input.setText(selected_dir)
+
+    def select_workpath(self):
+        """选择 build 工作目录"""
+        current_dir = self.workpath_input.text().strip() or self.get_default_workpath(self.file_input.text().strip())
+        selected_dir = QFileDialog.getExistingDirectory(self, "选择 build 工作目录", current_dir)
+        if selected_dir:
+            self.workpath_input.setText(selected_dir)
 
     def setup_common_tab(self):
         """设置常用命令选项卡"""
@@ -87,19 +138,19 @@ class PyInstallerGUI(QWidget):
         basic_group = QGroupBox("基本选项")
         basic_layout = QVBoxLayout()
 
-        self.help_cb = QCheckBox("-h, --help")
-        self.help_cb.setToolTip("显示帮助信息并退出")
-        # 添加悬停事件处理
-        self.help_cb.enterEvent = lambda event: self.show_explanation("显示PyInstaller的帮助信息并退出")
-        self.help_cb.leaveEvent = lambda event: self.clear_explanation()
-        basic_layout.addWidget(self.help_cb)
+        self.clean_cb = QCheckBox("--clean")
+        self.clean_cb.setChecked(True)
+        self.clean_cb.setToolTip("构建前清理 PyInstaller 缓存和临时文件")
+        self.clean_cb.enterEvent = lambda event: self.show_explanation("构建前清理 PyInstaller 缓存和临时文件")
+        self.clean_cb.leaveEvent = lambda event: self.clear_explanation()
+        basic_layout.addWidget(self.clean_cb)
 
-        self.version_cb = QCheckBox("-v, --version")
-        self.version_cb.setToolTip("显示程序版本信息并退出")
-        # 添加悬停事件处理
-        self.version_cb.enterEvent = lambda event: self.show_explanation("显示PyInstaller的版本信息并退出")
-        self.version_cb.leaveEvent = lambda event: self.clear_explanation()
-        basic_layout.addWidget(self.version_cb)
+        self.noconfirm_cb = QCheckBox("-y, --noconfirm")
+        self.noconfirm_cb.setChecked(True)
+        self.noconfirm_cb.setToolTip("覆盖已有输出目录时不再弹出确认")
+        self.noconfirm_cb.enterEvent = lambda event: self.show_explanation("覆盖已有输出目录时不再弹出确认")
+        self.noconfirm_cb.leaveEvent = lambda event: self.clear_explanation()
+        basic_layout.addWidget(self.noconfirm_cb)
 
         basic_group.setLayout(basic_layout)
         param_layout.addWidget(basic_group)
@@ -109,6 +160,7 @@ class PyInstallerGUI(QWidget):
         build_layout = QVBoxLayout()
 
         self.onefile_cb = QCheckBox("-F, --onefile")
+        self.onefile_cb.setChecked(True)
         self.onefile_cb.setToolTip("创建一个单一的可执行文件包")
         # 添加悬停事件处理
         self.onefile_cb.enterEvent = lambda event: self.show_explanation("将所有文件打包成一个单独的可执行文件")
@@ -143,6 +195,7 @@ class PyInstallerGUI(QWidget):
         os_layout.addWidget(self.console_cb)
 
         self.windowed_cb = QCheckBox("-w, --windowed, --noconsole")
+        self.windowed_cb.setChecked(True)
         self.windowed_cb.setToolTip("不提供控制台窗口进行标准I/O")
         # 添加悬停事件处理
         self.windowed_cb.enterEvent = lambda event: self.show_explanation("不显示控制台窗口（仅GUI应用程序）")
@@ -201,6 +254,38 @@ class PyInstallerGUI(QWidget):
         file_group.setLayout(file_layout)
         layout.addWidget(file_group)
 
+        path_group = QGroupBox("输出路径")
+        path_layout = QVBoxLayout()
+
+        self.distpath_label = QLabel("dist 输出目录")
+        path_layout.addWidget(self.distpath_label)
+        distpath_row = QHBoxLayout()
+        self.distpath_input = QLineEdit()
+        self.distpath_input.setPlaceholderText("默认与待打包 Python 文件同目录")
+        self.distpath_input.textChanged.connect(self.on_distpath_changed)
+        distpath_row.addWidget(self.distpath_input)
+        self.distpath_browse_btn = QPushButton("浏览...")
+        self.distpath_browse_btn.setFixedWidth(80)
+        self.distpath_browse_btn.clicked.connect(self.select_distpath)
+        distpath_row.addWidget(self.distpath_browse_btn)
+        path_layout.addLayout(distpath_row)
+
+        self.workpath_label = QLabel("build 工作目录")
+        path_layout.addWidget(self.workpath_label)
+        workpath_row = QHBoxLayout()
+        self.workpath_input = QLineEdit()
+        self.workpath_input.setPlaceholderText("默认与待打包 Python 文件同目录")
+        self.workpath_input.textChanged.connect(self.on_workpath_changed)
+        workpath_row.addWidget(self.workpath_input)
+        self.workpath_browse_btn = QPushButton("浏览...")
+        self.workpath_browse_btn.setFixedWidth(80)
+        self.workpath_browse_btn.clicked.connect(self.select_workpath)
+        workpath_row.addWidget(self.workpath_browse_btn)
+        path_layout.addLayout(workpath_row)
+
+        path_group.setLayout(path_layout)
+        layout.addWidget(path_group)
+
         # 预期命令框
         command_group = QGroupBox("预期命令")
         command_layout = QVBoxLayout()
@@ -216,6 +301,7 @@ class PyInstallerGUI(QWidget):
 
         # 连接信号以更新命令显示
         self.connect_signals()
+        self.update_command_display()
 
     def setup_custom_tab(self):
         """设置自定义命令选项卡"""
@@ -235,25 +321,6 @@ class PyInstallerGUI(QWidget):
         custom_group.setLayout(custom_layout)
         layout.addWidget(custom_group)
 
-        # 文件选择区
-        file_group = QGroupBox("选择Python文件 (可选)")
-        file_layout = QVBoxLayout()
-
-        file_select_layout = QHBoxLayout()
-        # 使用支持拖拽的输入框
-        self.custom_file_input = DragDropLineEdit()
-        self.custom_file_input.setPlaceholderText("拖放文件到此处或点击浏览按钮")
-        file_select_layout.addWidget(self.custom_file_input)
-
-        browse_btn = QPushButton("浏览...")
-        browse_btn.setFixedWidth(80)
-        browse_btn.clicked.connect(self.select_custom_python_file)
-        file_select_layout.addWidget(browse_btn)
-
-        file_layout.addLayout(file_select_layout)
-        file_group.setLayout(file_layout)
-        layout.addWidget(file_group)
-
         # 添加帮助链接
         help_layout = QHBoxLayout()
         help_layout.addStretch()
@@ -264,7 +331,7 @@ class PyInstallerGUI(QWidget):
         help_btn = QPushButton("PyInstaller文档")
         help_btn.setStyleSheet("color: blue; text-decoration: underline;")
         help_btn.setCursor(Qt.PointingHandCursor)
-        help_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://pyinstaller.org/en/stable/usage.html")))
+        help_btn.clicked.connect(self.open_pyinstaller_manual)
         help_layout.addWidget(help_btn)
 
         layout.addLayout(help_layout)
@@ -289,54 +356,132 @@ class PyInstallerGUI(QWidget):
         self.name_input.textChanged.connect(self.update_command_display)
         self.icon_input.textChanged.connect(self.update_command_display)
 
+    def get_python_executable(self):
+        """获取当前应使用的 Python 解释器路径"""
+        return get_python_executable()
+
+    def get_pyinstaller_prefix_args(self):
+        """始终使用当前解释器执行 PyInstaller，避免命中 PATH 中其他版本"""
+        return [self.get_python_executable(), "-m", "PyInstaller"]
+
+    def format_command_for_display(self, args):
+        """将参数列表格式化为可展示的命令字符串"""
+        if sys.platform == "win32":
+            return subprocess.list2cmdline(args)
+        return shlex.join(args)
+
+    def normalize_custom_command(self, command):
+        """将自定义命令中的裸 pyinstaller 改写为当前解释器执行"""
+        if not command:
+            return command
+
+        try:
+            args = shlex.split(command, posix=(sys.platform != "win32"))
+        except ValueError:
+            return command
+
+        if not args:
+            return command
+
+        first_arg = args[0].lower()
+        if first_arg in {"pyinstaller", "pyinstaller.exe"}:
+            args = self.get_pyinstaller_prefix_args() + args[1:]
+            return self.format_command_for_display(args)
+
+        if first_arg in {"python", "python.exe", "python3", "python3.exe"}:
+            args[0] = self.get_python_executable()
+            return self.format_command_for_display(args)
+
+        return command
+
+    def build_common_command_args(self):
+        """构建常用命令页的 PyInstaller 参数"""
+        args = self.get_pyinstaller_prefix_args()
+        file_path = self.file_input.text().strip()
+        distpath = self.distpath_input.text().strip() or self.get_default_distpath(file_path)
+        workpath = self.workpath_input.text().strip() or self.get_default_workpath(file_path)
+
+        # 添加基本选项
+        if self.clean_cb.isChecked():
+            args.append("--clean")
+        if self.noconfirm_cb.isChecked():
+            args.append("-y")
+        if distpath:
+            args.extend(["--distpath", distpath])
+        if workpath:
+            args.extend(["--workpath", workpath])
+
+        # 添加生成类型选项
+        if self.onefile_cb.isChecked():
+            args.append("-F")
+        if self.name_cb.isChecked() and self.name_input.text():
+            args.extend(["-n", self.name_input.text()])
+
+        # 添加操作系统特定选项
+        if self.console_cb.isChecked():
+            args.append("-c")
+        if self.windowed_cb.isChecked():
+            args.append("-w")
+        if self.hide_console_cb.isChecked():
+            args.append("--hide-console")
+        if self.icon_cb.isChecked() and self.icon_input.text():
+            args.extend(["-i", self.icon_input.text()])
+
+        args.append(file_path)
+        return args
+
+    def update_output_path_display(self):
+        """更新 dist/workpath 展示"""
+        file_path = self.file_input.text().strip()
+        default_distpath = self.get_default_distpath(file_path)
+        default_workpath = self.get_default_workpath(file_path)
+
+        if not self.distpath_customized:
+            self.distpath_input.blockSignals(True)
+            self.distpath_input.setText(default_distpath)
+            self.distpath_input.blockSignals(False)
+
+        if not self.workpath_customized:
+            self.workpath_input.blockSignals(True)
+            self.workpath_input.setText(default_workpath)
+            self.workpath_input.blockSignals(False)
+
+    def parse_output_dir_from_command(self, command):
+        """从命令中解析输出目录"""
+        if not command:
+            return None
+
+        try:
+            args = shlex.split(command, posix=(sys.platform != "win32"))
+        except ValueError:
+            return None
+
+        for index, arg in enumerate(args):
+            if arg == "--distpath" and index + 1 < len(args):
+                return args[index + 1]
+            if arg.startswith("--distpath="):
+                return arg.split("=", 1)[1]
+
+        script_path = None
+        for arg in reversed(args):
+            if arg.lower().endswith(".py") or arg.lower().endswith(".spec"):
+                script_path = arg
+                break
+
+        if script_path:
+            return self.get_default_distpath(script_path)
+        return None
+
     def update_command_display(self):
         """更新预期命令框的内容"""
+        self.update_output_path_display()
+
         if not self.file_input.text():
             self.command_display.setText("请先选择Python文件")
             return
 
-        command = "pyinstaller"
-
-        # 添加基本选项
-        if self.help_cb.isChecked():
-            command += " -h"
-        if self.version_cb.isChecked():
-            command += " -v"
-
-        # 添加生成类型选项
-        if self.onefile_cb.isChecked():
-            command += " -F"
-        if self.name_cb.isChecked() and self.name_input.text():
-            # 修复：只在名称包含空格时才添加引号
-            name = self.name_input.text()
-            if ' ' in name:
-                command += f' -n "{name}"'
-            else:
-                command += f' -n {name}'
-
-        # 添加操作系统特定选项
-        if self.console_cb.isChecked():
-            command += " -c"
-        if self.windowed_cb.isChecked():
-            command += " -w"
-        if self.hide_console_cb.isChecked():
-            command += " --hide-console"
-        if self.icon_cb.isChecked() and self.icon_input.text():
-            # 修复：只在图标路径包含空格时才添加引号
-            icon_path = self.icon_input.text()
-            if ' ' in icon_path:
-                command += f' -i "{icon_path}"'
-            else:
-                command += f' -i {icon_path}'
-
-        # 添加文件路径 - 关键修复：只在路径包含空格时才添加引号
-        file_path = self.file_input.text()
-        if ' ' in file_path:
-            command += f' "{file_path}"'
-        else:
-            command += f' {file_path}'
-
-        self.command_display.setText(command)
+        command_args = self.build_common_command_args()
+        self.command_display.setText(self.format_command_for_display(command_args))
 
     def select_python_file(self):
         """选择Python文件"""
@@ -346,15 +491,6 @@ class PyInstallerGUI(QWidget):
         )
         if file_path:
             self.file_input.setText(file_path)
-
-    def select_custom_python_file(self):
-        """为自定义命令选择Python文件"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择Python文件", "",
-            "Python文件 (*.py);;所有文件 (*)"
-        )
-        if file_path:
-            self.custom_file_input.setText(file_path)
 
     def select_icon_file(self):
         """选择图标文件"""
@@ -370,24 +506,29 @@ class PyInstallerGUI(QWidget):
         current_tab = self.tab_widget.currentIndex()
 
         if current_tab == 0:  # 常用命令
-            command = self.command_display.toPlainText().strip()
-            if not command or "pyinstaller" not in command:
+            if not self.file_input.text().strip():
                 QMessageBox.warning(self, "无效命令", "请先生成有效的打包命令")
                 return
+            python_executable = self.get_python_executable()
+            if not is_valid_python_executable(python_executable):
+                QMessageBox.warning(self, "无效解释器", "请先在主界面配置有效的 Python 解释器")
+                return
+            command_args = self.build_common_command_args()
+            command = self.format_command_for_display(command_args)
+            self.last_output_dir = self.distpath_input.text().strip() or self.get_default_distpath(self.file_input.text().strip())
         else:  # 自定义命令
             command = self.custom_command_input.toPlainText().strip()
             if not command:
                 QMessageBox.warning(self, "无效命令", "请输入有效的打包命令")
                 return
 
-            # 如果自定义命令中没有指定文件，但文件输入框中有内容，则添加文件
-            # 关键修复：只在路径包含空格时才添加引号
-            if self.custom_file_input.text():
-                file_path = self.custom_file_input.text()
-                if ' ' in file_path:
-                    command += f' "{file_path}"'
-                else:
-                    command += f' {file_path}'
+            python_executable = self.get_python_executable()
+            if not is_valid_python_executable(python_executable):
+                QMessageBox.warning(self, "无效解释器", "请先在主界面配置有效的 Python 解释器")
+                return
+
+            command = self.normalize_custom_command(command)
+            self.last_output_dir = self.parse_output_dir_from_command(command)
 
         # 创建输出窗口
         self.output_dialog = QDialog(self)
@@ -476,6 +617,8 @@ class PyInstallerGUI(QWidget):
         # 添加执行结果信息
         if exit_code == 0:
             self.append_output("\n✅ 命令执行成功!")
+            if self.last_output_dir and os.path.isdir(self.last_output_dir):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(self.last_output_dir))
         else:
             self.append_output(f"\n❌ 命令执行失败! 退出码: {exit_code}")
 
