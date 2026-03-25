@@ -7,7 +7,7 @@ import locale
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QLineEdit, QPushButton, QFileDialog, QMessageBox,
                             QHBoxLayout, QDialog, QLabel, QDialogButtonBox,
-                            QCheckBox, QTextEdit)
+                            QTextEdit)
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QDesktopServices, QFont
 
@@ -156,10 +156,9 @@ class PycdasGUI(QMainWindow):
         self.file_input = FileDropLineEdit()
         layout.addWidget(self.file_input)
 
-        # 输出选项
-        self.output_cb = QCheckBox("输出到同名.txt文件")
-        self.output_cb.setChecked(True)
-        layout.addWidget(self.output_cb)
+        # 输出说明
+        self.output_hint_label = QLabel("输出规则: 默认反汇编到同目录同名 .txt 文件")
+        layout.addWidget(self.output_hint_label)
 
         # 反汇编按钮
         self.disassemble_btn = QPushButton("反汇编")
@@ -274,32 +273,31 @@ class PycdasGUI(QMainWindow):
         try:
             # 获取系统编码
             system_encoding = locale.getpreferredencoding()
+            output_file = os.path.splitext(file_path)[0] + ".txt"
 
             # 构造命令
             command = [exe_path, file_path]
 
-            # 如果需要输出到文件
-            if self.output_cb.isChecked():
-                output_file = os.path.splitext(file_path)[0] + ".txt"
-                command.extend([">", output_file])
-
             # 执行命令
             result = subprocess.run(
-                " ".join(command),
+                command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                shell=True,
                 encoding=system_encoding,
                 errors='replace'
             )
 
+            if result.returncode == 0:
+                with open(output_file, "w", encoding=system_encoding, errors="replace") as output_handle:
+                    output_handle.write(result.stdout)
+
             # 显示结果对话框
-            self.show_result_dialog(result, file_path)
+            self.show_result_dialog(result, file_path, output_file)
 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"发生未知错误:\n{str(e)}")
 
-    def show_result_dialog(self, result, file_path):
+    def show_result_dialog(self, result, file_path, output_file):
         """显示结果对话框"""
         dialog = QDialog(self)
         dialog.setWindowTitle("反汇编结果")
@@ -308,7 +306,7 @@ class PycdasGUI(QMainWindow):
         layout = QVBoxLayout(dialog)
 
         # 标题
-        title = QLabel(f"pyc文件: {os.path.basename(file_path)}")
+        title = QLabel(f"pyc文件: {os.path.basename(file_path)}\n输出文件: {output_file}")
         title.setFont(QFont("Arial", 10, QFont.Bold))
         layout.addWidget(title)
 
