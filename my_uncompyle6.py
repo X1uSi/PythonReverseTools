@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTextEdit, QGroupBox)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
+from app_config import get_python_executable
 
 
 class FileDropEdit(QLineEdit):
@@ -76,11 +77,9 @@ class Uncompyle6GUI(QMainWindow):
         self.input_path_edit = FileDropEdit()
         input_layout.addWidget(self.input_path_edit)
 
-        # 输出目录
-        input_layout.addWidget(QLabel("输出目录:"))
-        self.output_dir_edit = FileDropEdit(is_directory=True)
-        self.output_dir_edit.setText(os.getcwd())  # 默认当前目录
-        input_layout.addWidget(self.output_dir_edit)
+        # 输出说明
+        self.output_hint_label = QLabel("输出规则: 单个 PYC 反编译到同目录同名 .py；目录批量反编译到原目录")
+        input_layout.addWidget(self.output_hint_label)
 
         layout.addWidget(input_group)
 
@@ -96,7 +95,6 @@ class Uncompyle6GUI(QMainWindow):
     def execute_decompile(self):
         """执行反编译命令"""
         input_path = self.input_path_edit.text().strip()
-        output_dir = self.output_dir_edit.text().strip()
 
         # 验证输入路径
         if not input_path:
@@ -107,10 +105,12 @@ class Uncompyle6GUI(QMainWindow):
             QMessageBox.critical(self, "错误", f"路径不存在:\n{input_path}")
             return
 
-        # 验证输出目录
-        if not output_dir:
-            QMessageBox.warning(self, "错误", "请指定输出目录")
-            return
+        if os.path.isfile(input_path):
+            output_dir = os.path.dirname(input_path)
+            output_path = os.path.splitext(input_path)[0] + ".py"
+        else:
+            output_dir = input_path
+            output_path = output_dir
 
         if not os.path.exists(output_dir):
             try:
@@ -126,7 +126,7 @@ class Uncompyle6GUI(QMainWindow):
             # 修复命令执行方式
             # 使用正确的模块路径调用uncompyle6
             command = [
-                sys.executable,  # 使用当前Python解释器
+                get_python_executable(),
                 "-m", "uncompyle6.bin.uncompyle6",
                 "-o", output_dir,
                 input_path
@@ -142,12 +142,12 @@ class Uncompyle6GUI(QMainWindow):
             )
 
             # 显示结果对话框
-            self.show_result_dialog(result, input_path, output_dir)
+            self.show_result_dialog(result, input_path, output_path)
 
         except Exception as e:
             QMessageBox.critical(self, "错误", f"发生未知错误:\n{str(e)}")
 
-    def show_result_dialog(self, result, input_path, output_dir):
+    def show_result_dialog(self, result, input_path, output_path):
         """显示结果对话框"""
         dialog = QDialog(self)
         dialog.setWindowTitle("反编译结果")
@@ -156,7 +156,7 @@ class Uncompyle6GUI(QMainWindow):
         layout = QVBoxLayout(dialog)
 
         # 标题
-        title = QLabel(f"输入路径: {input_path}\n输出目录: {output_dir}")
+        title = QLabel(f"输入路径: {input_path}\n输出位置: {output_path}")
         title.setFont(QFont("Arial", 10, QFont.Bold))
         layout.addWidget(title)
 
